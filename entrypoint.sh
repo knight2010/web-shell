@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# 获取平台端口，默认为 10000
+# 获取平台端口，未指定时兜底为 10000
 APP_PORT="${PORT:-10000}"
 AUTH_USER="${SHELL_USER:-admin}"
 AUTH_PASS="${SHELL_PASS:-RenderShell@2026}"
@@ -12,13 +12,19 @@ if [ -f "/root/my_script.sh" ]; then
     nohup /root/my_script.sh > /root/my_script.log 2>&1 &
 fi
 
-# 2. 生成 Nginx 动态路由配置（多端口全局兜底监听）
+# 2. 动态生成监听端口列表（自动去重，避免 duplicate listen 报错）
+LISTEN_DIRECTIVES="listen ${APP_PORT} default_server;"
+for p in 80 8080 10000; do
+    if [ "$p" != "$APP_PORT" ]; then
+        LISTEN_DIRECTIVES="${LISTEN_DIRECTIVES}
+    listen ${p};"
+    fi
+done
+
+# 3. 写入 Nginx 配置文件
 cat <<EOF > /etc/nginx/sites-available/default
 server {
-    listen ${APP_PORT} default_server;
-    listen 80;
-    listen 8080;
-    listen 10000;
+    ${LISTEN_DIRECTIVES}
     server_name _;
 
     # 外部专属 health 接口：无需鉴权，直接返回 200 OK
@@ -27,7 +33,7 @@ server {
         return 200 '{"status":"ok","uptime":"running"}';
     }
 
-    # 根路径：全功能代理到内网 ttyd，并完整支持 WebSocket
+    # 根路径：代理到内网 ttyd，并完整支持 WebSocket
     location / {
         proxy_pass http://127.0.0.1:7681;
         proxy_http_version 1.1;
@@ -42,10 +48,14 @@ server {
 }
 EOF
 
-# 测试并启动/重载 Nginx
+# 4. 确保 sites-enabled 软链接存在
+mkdir -p /etc/nginx/sites-enabled
+ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+
+# 5. 校验并启动 Nginx
 nginx -t
 nginx -g "daemon on;"
 
-# 3. 启动 ttyd 监听本地回路端口 7681
+# 6. 前台拉起 ttyd 终端
 echo "[$(date)] Starting ttyd on 127.0.0.1:7681..."
 exec ttyd -W -p 7681 -c "${AUTH_USER}:${AUTH_PASS}" /bin/bash
