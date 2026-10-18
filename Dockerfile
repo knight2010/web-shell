@@ -36,6 +36,6 @@ COPY argosbx.sh /root/argosbx.sh
 
 RUN chmod +x /entrypoint.sh /root/my_script.sh
 
-EXPOSE 10000
+EXPOSE 80 8080 10000
 
 CMD ["/entrypoint.sh"]

@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e
 
-PORT="${PORT:-10000}"
+# 获取平台端口，默认为 10000
+APP_PORT="${PORT:-10000}"
 AUTH_USER="${SHELL_USER:-admin}"
 AUTH_PASS="${SHELL_PASS:-RenderShell@2026}"
 
@@ -11,13 +12,16 @@ if [ -f "/root/my_script.sh" ]; then
     nohup /root/my_script.sh > /root/my_script.log 2>&1 &
 fi
 
-# 2. 生成 Nginx 动态路由配置
+# 2. 生成 Nginx 动态路由配置（多端口全局兜底监听）
 cat <<EOF > /etc/nginx/sites-available/default
 server {
-    listen ${PORT};
+    listen ${APP_PORT} default_server;
+    listen 80;
+    listen 8080;
+    listen 10000;
     server_name _;
 
-    # 外部专属 health 接口：无需鉴权，直接返回 200 OK 与运行状态
+    # 外部专属 health 接口：无需鉴权，直接返回 200 OK
     location /health {
         default_type application/json;
         return 200 '{"status":"ok","uptime":"running"}';
@@ -38,9 +42,10 @@ server {
 }
 EOF
 
-# 启动 Nginx 反向代理
+# 测试并启动/重载 Nginx
+nginx -t
 nginx -g "daemon on;"
 
 # 3. 启动 ttyd 监听本地回路端口 7681
-echo "[$(date)] Starting ttyd on 127.0.0.1:7681, Nginx listening on port $PORT..."
+echo "[$(date)] Starting ttyd on 127.0.0.1:7681..."
 exec ttyd -W -p 7681 -c "${AUTH_USER}:${AUTH_PASS}" /bin/bash
